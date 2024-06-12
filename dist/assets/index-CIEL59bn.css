@@ -1,0 +1,1 @@
+html,body{overscroll-behavior-y:contain;overflow-x:hidden;position:relative;height:100vh;overflow-y:hidden}*{margin:0;padding:0;box-sizing:border-box}canvas{position:fixed;display:block;z-index:2}video{width:100vw;height:100svh;object-fit:cover}
