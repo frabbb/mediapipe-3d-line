@@ -44,13 +44,18 @@ new p5((sk) => {
     sk.stroke("black");
     sk.strokeWeight(2);
 
-    video = sk.createCapture(sk.VIDEO, { flipped: true });
+    video = sk.createCapture(sk.VIDEO);
+
+    // video.hide();
 
     createHandLandmarker();
   };
 
   sk.draw = () => {
     sk.clear();
+
+    // sk.image(video, 0, 0, sk.width, sk.height);
+
     sk.push();
 
     if (handLandmarker && video) {
@@ -127,7 +132,7 @@ new p5((sk) => {
       }
       if (sk.dist(indexFinger.x, indexFinger.y, thumb.x, thumb.y) < 0.1) {
         return {
-          x: ((indexFinger.x + thumb.x) / 2) * sk.width,
+          x: sk.width - ((indexFinger.x + thumb.x) / 2) * sk.width,
           y: ((indexFinger.y + thumb.y) / 2) * sk.height,
         };
       }
