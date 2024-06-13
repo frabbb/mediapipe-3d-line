@@ -3,6 +3,8 @@ import {
   FilesetResolver,
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
+import p5 from "p5";
+
 let Line = [];
 let angle = 0;
 let rotationXstart;
