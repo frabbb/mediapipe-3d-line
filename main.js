@@ -11,18 +11,28 @@ let lineDrawn = false;
 let video;
 let videoSize;
 let axesH, axesW;
-let hands = [];
 let font;
 let landmarks;
-
 let handLandmarker = undefined;
+let handsLandmarks = [];
+let hands = [];
 let lastVideoTime = -1;
 
-let canvas;
+const handsRef = {
+  left: 1,
+  right: 0,
+};
+
 let sk;
 
-let touching = false;
-let disconnected = 0;
+let speed = {
+  default: 5,
+  target: 5,
+  current: 5,
+  min: 0,
+  max: 20,
+  acceleration: 0.2,
+};
 
 async function createHandLandmarker() {
   const vision = await FilesetResolver.forVisionTasks(
@@ -34,7 +44,7 @@ async function createHandLandmarker() {
       delegate: "GPU",
     },
     runningMode: "VIDEO",
-    numHands: 1,
+    numHands: 2,
   });
 }
 
@@ -45,7 +55,7 @@ sk.preload = () => {
 };
 
 sk.setup = () => {
-  canvas = sk.createCanvas(sk.windowWidth, sk.windowHeight, sk.WEBGL);
+  sk.createCanvas(sk.windowWidth, sk.windowHeight, sk.WEBGL);
   axesH = sk.height / 3;
   axesW = sk.min(sk.width / 2, axesH);
 
@@ -77,8 +87,6 @@ sk.draw = () => {
         : (sk.width / video.width) * video.height,
   };
 
-  // sk.image(video, 0, 0, videoSize.w, videoSize.h);
-
   sk.push();
 
   if (handLandmarker && video) {
@@ -87,35 +95,54 @@ sk.draw = () => {
     let startTimeMs = performance.now();
 
     if (video.currentTime !== lastVideoTime && video.currentTime) {
-      hands = handLandmarker.detectForVideo(video, startTimeMs);
+      handsLandmarks = handLandmarker.detectForVideo(video, startTimeMs);
       lastVideoTime = video.currentTime;
     }
   }
 
   sk.push();
   sk.translate(-sk.width / 2, -sk.height / 2);
-  const point = drawKeypoints();
+  drawHands();
   sk.pop();
 
-  angle = angle + 75;
+  angle = angle + speed.current;
 
-  if (point) {
+  const drawPoint = hands[handsRef.right]?.origin;
+  const speedPoint = hands[handsRef.left]?.origin;
+
+  if (drawPoint) {
     if (lineDrawn) {
       line = [];
       lineDrawn = false;
     }
 
-    let x = (point.x - sk.width / 2) * sk.cos(angle);
-    let y = point.y - sk.height / 2;
-    let z = (point.x - sk.width / 2) * sk.sin(angle);
+    let x = (drawPoint.x - sk.width / 2) * sk.cos(angle);
+    let y = drawPoint.y - sk.height / 2;
+    let z = (drawPoint.x - sk.width / 2) * sk.sin(angle);
 
     line.push([x, y, z]);
-  } else if (landmarks?.length) {
+  } else if (hands[handsRef.right]?.points.length) {
     lineDrawn = !!line.length;
   }
 
-  if (angle == 360) {
-    angle = 0;
+  if (speedPoint) {
+    speed.target = sk.map(
+      speedPoint.y,
+      100,
+      sk.height - 100,
+      speed.max,
+      speed.min,
+      true
+    );
+  }
+
+  speed.current =
+    speed.current + (speed.target - speed.current) * speed.acceleration;
+
+  angle = angle + speed.current;
+
+  if (angle >= 360) {
+    angle = angle - 360;
   }
   sk.rotateY(angle);
   sk.stroke(255);
@@ -136,63 +163,83 @@ sk.draw = () => {
   sk.pop();
 };
 
-let points = [];
+function drawHands() {
+  if (!handsLandmarks.landmarks) return;
 
-function drawKeypoints() {
-  if (!hands.landmarks) return;
-  landmarks = hands.landmarks;
+  handsLandmarks.landmarks.forEach((handData, index) => {
+    const type = handsLandmarks.handednesses[index][0].index;
 
-  for (const hand of landmarks) {
-    const indexFinger = hand[4];
-    const thumb = hand[8];
+    const hand = hands[type];
+
+    if (!hand) {
+      hands[type] = new Hand(handData, type);
+    } else {
+      hand.draw(handData);
+    }
+  });
+}
+
+const Hand = class {
+  constructor(data, type) {
+    this.points = [];
+    this.touching = false;
+    this.disconnectedFor = 0;
+    this.origin = null;
+    this.type = type;
+
+    this.draw(data);
+  }
+
+  draw(data) {
+    const indexFinger = data[4];
+    const thumb = data[8];
 
     const dist = sk.dist(indexFinger.x, indexFinger.y, thumb.x, thumb.y);
 
     if (dist < 0.05) {
-      touching = true;
-      disconnected = 0;
+      this.touching = true;
+      this.disconnectedFor = 0;
     } else if (dist < 0.2) {
-      disconnected++;
-      if (disconnected >= 40) {
-        touching = false;
+      this.disconnectedFor++;
+      if (this.disconnectedFor >= 20) {
+        this.touching = false;
       }
     } else {
-      touching = false;
+      this.touching = false;
     }
 
-    hand.map((point, index) => {
+    data.map((point, index) => {
       const coords = {
         x: sk.width - point.x * videoSize.w + (videoSize.w - sk.width) / 2,
         y: point.y * videoSize.h - (videoSize.h - sk.height) / 2,
         z: point.z,
       };
 
-      if (!points[index]) {
-        const newPoint = new Point(coords, index);
-        points.push(newPoint);
+      if (!this.points[index]) {
+        const newPoint = new Point(coords, index, this.type);
+        this.points.push(newPoint);
       } else {
-        points[index].draw(coords, touching);
+        this.points[index].draw(coords, this.touching);
       }
     });
 
-    if (touching && points[8]) {
-      return {
-        x: (points[4].pos.x + points[8].pos.x) / 2,
-        y: (points[4].pos.y + points[4].pos.y) / 2,
-      };
-    }
+    this.origin = this.touching
+      ? {
+          x: (this.points[4].pos.x + this.points[8].pos.x) / 2,
+          y: (this.points[4].pos.y + this.points[4].pos.y) / 2,
+        }
+      : null;
   }
-}
+};
 
 const Point = class {
-  constructor(coords, index) {
+  constructor(coords, index, hand) {
     this.targetPos = coords;
     this.pos = coords;
     this.index = index;
-    this.easing = 0.1;
+    this.easing = 0.5;
     this.size = 20;
-
-    // this.draw(coords);
+    this.hand = hand;
   }
 
   draw(coords, touching = false) {
@@ -206,9 +253,13 @@ const Point = class {
 
     sk.strokeWeight(0);
 
-    sk.fill(0, 0, 0);
+    sk.fill(
+      this.hand === handsRef.right ? 255 : 0,
+      0,
+      this.hand === handsRef.left ? 255 : 0
+    );
 
-    if (touching) {
+    if (touching && [8, 4].includes(this.index)) {
       sk.fill(0, 255, 0);
     }
 
