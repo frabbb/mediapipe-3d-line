@@ -5,20 +5,24 @@ import {
 
 import p5 from "p5";
 
-let Line = [];
+let line = [];
 let angle = 0;
-let rotationXstart;
-let rotationYstart;
-let rotationZstart;
 let lineDrawn = false;
 let video;
+let videoSize;
 let axesH, axesW;
 let hands = [];
+let font;
+let landmarks;
 
 let handLandmarker = undefined;
 let lastVideoTime = -1;
 
 let canvas;
+let sk;
+
+let touching = false;
+let disconnected = 0;
 
 async function createHandLandmarker() {
   const vision = await FilesetResolver.forVisionTasks(
@@ -34,110 +38,182 @@ async function createHandLandmarker() {
   });
 }
 
-new p5((sk) => {
-  sk.setup = () => {
-    canvas = sk.createCanvas(sk.windowWidth, sk.windowHeight, sk.WEBGL);
-    axesH = sk.height / 3;
-    axesW = sk.min(sk.width / 2, axesH);
+new p5((instance) => (sk = instance));
 
-    sk.angleMode(sk.DEGREES);
-    sk.imageMode(sk.CENTER);
+sk.preload = () => {
+  font = sk.loadFont("/mediapipe-3d-line/assets/SpaceMono-Regular.ttf");
+};
 
-    sk.stroke("black");
-    sk.strokeWeight(2);
+sk.setup = () => {
+  canvas = sk.createCanvas(sk.windowWidth, sk.windowHeight, sk.WEBGL);
+  axesH = sk.height / 3;
+  axesW = sk.min(sk.width / 2, axesH);
 
-    video = sk.createCapture(sk.VIDEO);
+  sk.angleMode(sk.DEGREES);
+  sk.imageMode(sk.CENTER);
+  sk.textFont(font);
+  sk.textSize(16);
+  sk.textAlign(sk.CENTER);
 
-    // video.hide();
+  sk.stroke("black");
+  sk.strokeWeight(2);
 
-    createHandLandmarker();
+  video = sk.createCapture(sk.VIDEO);
+
+  createHandLandmarker();
+};
+
+sk.draw = () => {
+  sk.clear();
+
+  videoSize = {
+    w:
+      sk.width > sk.height
+        ? sk.width
+        : (sk.height / video.height) * video.width,
+    h:
+      sk.height > sk.width
+        ? sk.height
+        : (sk.width / video.width) * video.height,
   };
 
-  sk.draw = () => {
-    sk.clear();
+  // sk.image(video, 0, 0, videoSize.w, videoSize.h);
 
-    // sk.image(video, 0, 0, sk.width, sk.height);
+  sk.push();
 
-    sk.push();
+  if (handLandmarker && video) {
+    const video = document.querySelector("video");
 
-    if (handLandmarker && video) {
-      const video = document.querySelector("video");
+    let startTimeMs = performance.now();
 
-      let startTimeMs = performance.now();
-
-      if (video.currentTime !== lastVideoTime && video.currentTime) {
-        hands = handLandmarker.detectForVideo(video, startTimeMs);
-        lastVideoTime = video.currentTime;
-      }
-    }
-
-    sk.push();
-    sk.translate(-sk.width / 2, -sk.height / 2);
-    const point = drawKeypoints();
-    sk.pop();
-
-    if (point) {
-      if (lineDrawn) {
-        Line = [];
-        lineDrawn = false;
-      }
-
-      angle = angle + 2;
-
-      let x = (point.x - sk.width / 2) * sk.cos(angle);
-      let y = point.y - sk.height / 2;
-      let z = (point.x - sk.width / 2) * sk.sin(angle);
-
-      Line.push([x, y, z]);
-
-      rotationXstart = sk.rotationX;
-      rotationYstart = sk.rotationY;
-      rotationZstart = sk.rotationZ;
-    } else {
-      lineDrawn = !!Line.length;
-
-      angle += 0.5;
-
-      sk.rotateX(sk.rotationX - rotationXstart);
-      sk.rotateY(sk.rotationY - rotationYstart);
-      sk.rotateZ(sk.rotationZ - rotationZstart);
-    }
-
-    if (angle == 360) {
-      angle = 0;
-    }
-    sk.rotateY(angle);
-    sk.beginShape();
-    sk.noFill();
-
-    for (let i = 0; i < Line.length; i++) {
-      let [x, y, z] = Line[i];
-      sk.vertex(x, y, z);
-    }
-
-    sk.endShape();
-
-    sk.strokeWeight(1);
-    sk.line(axesW, 0, 0, -axesW, 0, 0);
-    sk.line(0, axesH, 0, 0, -axesH, 0);
-    sk.pop();
-  };
-
-  function drawKeypoints() {
-    if (!hands.landmarks) return;
-
-    for (const landmarks of hands.landmarks) {
-      const indexFinger = landmarks[4];
-      const thumb = landmarks[8];
-      for (const point of landmarks) {
-        // sk.ellipse(point.x * sk.width, point.y * sk.height, 10, 10);
-      }
-      if (sk.dist(indexFinger.x, indexFinger.y, thumb.x, thumb.y) < 0.1) {
-        return {
-          x: sk.width - ((indexFinger.x + thumb.x) / 2) * sk.width,
-          y: ((indexFinger.y + thumb.y) / 2) * sk.height,
-        };
-      }
+    if (video.currentTime !== lastVideoTime && video.currentTime) {
+      hands = handLandmarker.detectForVideo(video, startTimeMs);
+      lastVideoTime = video.currentTime;
     }
   }
-});
+
+  sk.push();
+  sk.translate(-sk.width / 2, -sk.height / 2);
+  const point = drawKeypoints();
+  sk.pop();
+
+  angle = angle + 75;
+
+  if (point) {
+    if (lineDrawn) {
+      line = [];
+      lineDrawn = false;
+    }
+
+    let x = (point.x - sk.width / 2) * sk.cos(angle);
+    let y = point.y - sk.height / 2;
+    let z = (point.x - sk.width / 2) * sk.sin(angle);
+
+    line.push([x, y, z]);
+  } else if (landmarks?.length) {
+    lineDrawn = !!line.length;
+  }
+
+  if (angle == 360) {
+    angle = 0;
+  }
+  sk.rotateY(angle);
+  sk.stroke(255);
+
+  sk.strokeWeight(5);
+  sk.beginShape();
+  sk.noFill();
+
+  for (let i = 0; i < line.length; i++) {
+    let [x, y, z] = line[i];
+    sk.vertex(x, y, z);
+  }
+
+  sk.endShape();
+
+  sk.line(axesW, 0, 0, -axesW, 0, 0);
+  sk.line(0, axesH, 0, 0, -axesH, 0);
+  sk.pop();
+};
+
+let points = [];
+
+function drawKeypoints() {
+  if (!hands.landmarks) return;
+  landmarks = hands.landmarks;
+
+  for (const hand of landmarks) {
+    const indexFinger = hand[4];
+    const thumb = hand[8];
+
+    const dist = sk.dist(indexFinger.x, indexFinger.y, thumb.x, thumb.y);
+
+    if (dist < 0.05) {
+      touching = true;
+      disconnected = 0;
+    } else if (dist < 0.2) {
+      disconnected++;
+      if (disconnected >= 40) {
+        touching = false;
+      }
+    } else {
+      touching = false;
+    }
+
+    hand.map((point, index) => {
+      const coords = {
+        x: sk.width - point.x * videoSize.w + (videoSize.w - sk.width) / 2,
+        y: point.y * videoSize.h - (videoSize.h - sk.height) / 2,
+        z: point.z,
+      };
+
+      if (!points[index]) {
+        const newPoint = new Point(coords, index);
+        points.push(newPoint);
+      } else {
+        points[index].draw(coords, touching);
+      }
+    });
+
+    if (touching && points[8]) {
+      return {
+        x: (points[4].pos.x + points[8].pos.x) / 2,
+        y: (points[4].pos.y + points[4].pos.y) / 2,
+      };
+    }
+  }
+}
+
+const Point = class {
+  constructor(coords, index) {
+    this.targetPos = coords;
+    this.pos = coords;
+    this.index = index;
+    this.easing = 0.1;
+    this.size = 20;
+
+    // this.draw(coords);
+  }
+
+  draw(coords, touching = false) {
+    this.targetPos = coords;
+
+    Object.entries(this.targetPos).map(
+      ([key, value]) => (this.pos[key] += (value - this.pos[key]) * this.easing)
+    );
+
+    this.size = sk.map(this.pos.z, -0.1, 0, 50, 20, true);
+
+    sk.strokeWeight(0);
+
+    sk.fill(0, 0, 0);
+
+    if (touching) {
+      sk.fill(0, 255, 0);
+    }
+
+    sk.ellipse(this.pos.x, this.pos.y, this.size, this.size);
+    sk.fill(255);
+    sk.text(this.index, this.pos.x, this.pos.y);
+  }
+};
