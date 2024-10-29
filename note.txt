@@ -1,0 +1,4 @@
+- capire come regolare la velocità
+- toggle smooth punti o no (tendenda a target point)
+- usare mano per ruotare scultura
+- opzione costruttiva (più tratti senza cancellare) o distruttiva (ogni tratto cancella quello prima)
