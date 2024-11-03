@@ -1,5 +1,5 @@
 import {
-  HandLandmarker,
+  GestureRecognizer,
   FilesetResolver,
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
@@ -12,7 +12,8 @@ let video;
 let videoSize;
 let axesH, axesW;
 let font;
-let handLandmarker = undefined;
+let landmarks;
+let gestureRecognizer = undefined;
 let handsLandmarks = [];
 let hands = [];
 let lastVideoTime = -1;
@@ -38,16 +39,17 @@ let speed = {
   easing: 0.2,
 };
 
-async function createHandLandmarker() {
+async function createGestureRecognizer() {
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
   );
-  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+  gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
       delegate: "GPU",
     },
-    runningMode: "VIDEO",
+    runningMode: "IMAGE",
     numHands: 1,
   });
 }
@@ -73,7 +75,7 @@ sk.setup = () => {
 
   video = sk.createCapture(sk.VIDEO);
 
-  createHandLandmarker();
+  createGestureRecognizer();
 };
 
 sk.draw = () => {
@@ -92,13 +94,13 @@ sk.draw = () => {
 
   sk.push();
 
-  if (handLandmarker && video) {
+  if (gestureRecognizer && video) {
     const video = document.querySelector("video");
 
     let startTimeMs = performance.now();
 
     if (video.currentTime !== lastVideoTime && video.currentTime) {
-      handsLandmarks = handLandmarker.detectForVideo(video, startTimeMs);
+      handsLandmarks = gestureRecognizer.recognize(video);
       lastVideoTime = video.currentTime;
     }
   }
@@ -134,6 +136,15 @@ sk.draw = () => {
     let z = (draw.current.x - sk.width / 2) * sk.sin(angle);
 
     line.push([x, y, z]);
+
+    // speed.target = sk.map(
+    //   drawPoint.x,
+    //   100 * 0.1,
+    //   sk.width * 0.9,
+    //   speed.max,
+    //   speed.min,
+    //   true
+    // );
   } else if (hands[handsRef.right]?.points.length) {
     lineDrawn = !!line.length;
   }
@@ -192,17 +203,13 @@ const Hand = class {
   draw(data) {
     const indexFinger = data[4];
     const thumb = data[8];
-    const thumbIndexDist = sk.dist(
-      indexFinger.x,
-      indexFinger.y,
-      thumb.x,
-      thumb.y
-    );
 
-    if (thumbIndexDist < 0.05) {
+    const dist = sk.dist(indexFinger.x, indexFinger.y, thumb.x, thumb.y);
+
+    if (dist < 0.05) {
       this.touching = true;
       this.disconnectedFor = 0;
-    } else if (thumbIndexDist < 0.2) {
+    } else if (dist < 0.2) {
       this.disconnectedFor++;
       if (this.disconnectedFor >= 5) {
         this.touching = false;
@@ -211,80 +218,20 @@ const Hand = class {
       this.touching = false;
     }
 
-    let showingPalm = !this.touching;
-
-    const palmHeight = sk.dist(
-      ...Object.values(data[0]),
-      ...Object.values(data[17])
-    );
-    const palmPoints = [0, 5, 17];
-
-    const palmArea = triangleArea(
-      data[palmPoints[0]],
-      data[palmPoints[1]],
-      data[palmPoints[2]]
-    );
-
-    const palmExtended = (palmHeight * palmHeight * 0.5) / 2 < palmArea;
-
-    showingPalm = showingPalm && palmExtended;
-
-    for (let f = 5; f < data.length; f += 4) {
-      const fingerPoints = [data[f], data[f + 1], data[f + 2], data[f + 3]];
-
-      const fingerExtended = isFingerExtended(fingerPoints);
-
-      showingPalm = showingPalm && fingerExtended;
-    }
-
-    function mapCoords(point) {
-      return {
+    data.map((point, index) => {
+      const coords = {
         x: sk.width - point.x * videoSize.w + (videoSize.w - sk.width) / 2,
         y: point.y * videoSize.h - (videoSize.h - sk.height) / 2,
-        z: 0,
+        z: point.z,
       };
-    }
 
-    let increment = 1;
-
-    for (let f = 0; f < data.length; f += increment) {
-      if (f === 1) {
-        increment = 4;
+      if (!this.points[index]) {
+        const newPoint = new Point(coords, index, this.type);
+        this.points.push(newPoint);
+      } else {
+        this.points[index].draw(coords, this.touching);
       }
-
-      sk.beginShape();
-      for (let i = f; i < f + increment; i++) {
-        let point = data[i];
-        const coords = mapCoords(point);
-
-        if (!this.points[i]) {
-          const newPoint = new Point(coords, i, this.type);
-          this.points[i] = newPoint;
-        } else {
-          this.points[i].update(coords);
-        }
-
-        sk.vertex(...Object.values(coords));
-
-        sk.strokeWeight(10);
-        sk.stroke(showingPalm ? 0 : 255, 255, showingPalm ? 0 : 255);
-        sk.noFill();
-      }
-
-      if (f === 0) {
-        const palmPoints = [0, 1, 5, 9, 13, 17, 0];
-
-        palmPoints.forEach((p) =>
-          sk.vertex(...Object.values(mapCoords(data[p])))
-        );
-      }
-
-      sk.endShape();
-    }
-
-    for (let p = 0; p < data.length; p++) {
-      this.points[p].draw(this.touching);
-    }
+    });
 
     this.origin = this.touching
       ? {
@@ -295,52 +242,24 @@ const Hand = class {
   }
 };
 
-function isFingerExtended(points, tolerance = 0.2) {
-  const vectors = [];
-  for (let i = 0; i < points.length - 1; i++) {
-    const dx = points[i + 1].x - points[i].x;
-    const dy = points[i + 1].y - points[i].y;
-    vectors.push({ dx, dy });
-  }
-
-  for (let i = 0; i < vectors.length - 1; i++) {
-    const angle = Math.abs(
-      Math.atan2(vectors[i + 1].dy, vectors[i + 1].dx) -
-        Math.atan2(vectors[i].dy, vectors[i].dx)
-    );
-
-    if (angle > tolerance) return false;
-  }
-
-  return true;
-}
-
-function triangleArea(a, b, c) {
-  return Math.abs(
-    0.5 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
-  );
-}
-
 const Point = class {
   constructor(coords, index, hand) {
     this.targetPos = coords;
     this.pos = coords;
     this.index = index;
     this.easing = 1;
-    this.size = 15;
+    this.size = 20;
     this.hand = hand;
   }
 
-  update(coords) {
+  draw(coords, touching = false) {
     this.targetPos = coords;
-  }
 
-  draw(touching = false) {
     Object.entries(this.targetPos).map(
       ([key, value]) => (this.pos[key] += (value - this.pos[key]) * this.easing)
     );
 
-    sk.strokeWeight(10);
+    sk.strokeWeight(0);
 
     sk.fill(
       this.hand === handsRef.right ? 255 : 0,
@@ -354,7 +273,5 @@ const Point = class {
 
     sk.ellipse(this.pos.x, this.pos.y, this.size, this.size);
     sk.fill(255);
-    // sk.text(Math.round(this.pos.z * 100) / 100, this.pos.x, this.pos.y);
-    // sk.text(this.index, this.pos.x, this.pos.y);
   }
 };
