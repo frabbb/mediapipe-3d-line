@@ -5,6 +5,8 @@ import {
 
 import p5 from "p5";
 
+import { clamp, map } from "./utils";
+
 let line = [];
 let angle = 0;
 let lineDrawn = false;
@@ -17,6 +19,11 @@ let handsLandmarks = [];
 let hands = [];
 let lastVideoTime = -1;
 let sk;
+
+let settingsEl = document.querySelector(".settings");
+let rangeEl = document.querySelector(".range");
+let speedEl = document.querySelector(".value");
+let showSettings = false;
 
 let draw = {
   current: undefined,
@@ -34,7 +41,7 @@ let speed = {
   target: 5,
   current: 5,
   min: 0,
-  max: 30,
+  max: 50,
   easing: 0.2,
 };
 
@@ -108,10 +115,41 @@ sk.draw = () => {
   drawHands();
   sk.pop();
 
+  if (
+    ([
+      // hands[handsRef.right]?.openPalmCounter,
+      hands[handsRef.left]?.openPalmCounter,
+    ].includes(30) &&
+      !showSettings) ||
+    ([
+      // hands[handsRef.right]?.openPalmCounter,
+      hands[handsRef.left]?.openPalmCounter,
+    ].every((v) => !v) &&
+      showSettings)
+  ) {
+    toggleSettings();
+  }
+
+  if (showSettings) {
+    const point = hands[handsRef.left]?.points[0];
+    // hands[handsRef.right]?.points[0] ||
+
+    console.log(point.pos.x);
+
+    speed.target = Math.round(
+      map(point.pos.x, 100, window.innerWidth - 100, speed.min, speed.max, true)
+    );
+
+    rangeEl.style.width = `${(speed.target / speed.max) * 100}%`;
+    speedEl.innerHTML = speed.target;
+
+    return;
+  }
+
   angle = angle + speed.current;
 
-  const drawPoint =
-    hands[handsRef.right]?.origin || hands[handsRef.left]?.origin;
+  const drawPoint = hands[handsRef.right]?.origin;
+  // || hands[handsRef.left]?.origin;
 
   if (drawPoint) {
     if (lineDrawn) {
@@ -134,7 +172,10 @@ sk.draw = () => {
     let z = (draw.current.x - sk.width / 2) * sk.sin(angle);
 
     line.push([x, y, z]);
-  } else if (hands[handsRef.right]?.points.length) {
+  } else if (
+    hands[handsRef.right]?.points.length ||
+    hands[handsRef.left]?.points.length
+  ) {
     lineDrawn = !!line.length;
   }
 
@@ -162,8 +203,18 @@ sk.draw = () => {
   sk.pop();
 };
 
+function toggleSettings() {
+  showSettings = !showSettings;
+  settingsEl.classList.toggle("open");
+}
+
 function drawHands() {
-  if (!handsLandmarks.landmarks) return;
+  if (!handsLandmarks.landmarks?.length) {
+    Object.values(hands).forEach((hand) => {
+      hand.openPalmCounter = clamp(hand.openPalmCounter - 1, 0, 30);
+    });
+    return;
+  }
 
   handsLandmarks.landmarks.forEach((handData, index) => {
     const type = handsLandmarks.handednesses[index][0].index;
@@ -178,11 +229,38 @@ function drawHands() {
   });
 }
 
+function isFingerExtended(points, tolerance = 0.2) {
+  const vectors = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const dx = points[i + 1].x - points[i].x;
+    const dy = points[i + 1].y - points[i].y;
+    vectors.push({ dx, dy });
+  }
+
+  for (let i = 0; i < vectors.length - 1; i++) {
+    const angle = Math.abs(
+      Math.atan2(vectors[i + 1].dy, vectors[i + 1].dx) -
+        Math.atan2(vectors[i].dy, vectors[i].dx)
+    );
+
+    if (angle > tolerance) return false;
+  }
+
+  return true;
+}
+
+function triangleArea(a, b, c) {
+  return Math.abs(
+    0.5 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
+  );
+}
+
 const Hand = class {
   constructor(data, type) {
     this.points = [];
     this.touching = false;
-    this.disconnectedFor = 0;
+    this.indexThumbCounter = 0;
+    this.openPalmCounter = 0;
     this.origin = null;
     this.type = type;
 
@@ -200,18 +278,23 @@ const Hand = class {
     );
 
     if (thumbIndexDist < 0.05) {
-      this.touching = true;
-      this.disconnectedFor = 0;
+      this.indexThumbCounter++;
     } else if (thumbIndexDist < 0.2) {
-      this.disconnectedFor++;
-      if (this.disconnectedFor >= 5) {
-        this.touching = false;
-      }
+      this.indexThumbCounter--;
     } else {
-      this.touching = false;
+      this.indexThumbCounter = 0;
     }
 
-    let showingPalm = !this.touching;
+    this.indexThumbCounter = clamp(this.indexThumbCounter, 0, 15);
+
+    this.touching =
+      this.indexThumbCounter === 15
+        ? true
+        : this.indexThumbCounter === 0
+        ? false
+        : this.touching;
+
+    let openPalm = !this.touching;
 
     const palmHeight = sk.dist(
       ...Object.values(data[0]),
@@ -225,17 +308,23 @@ const Hand = class {
       data[palmPoints[2]]
     );
 
-    const palmExtended = (palmHeight * palmHeight * 0.5) / 2 < palmArea;
+    const palmExtended = ((palmHeight * palmHeight * 0.5) / 2) * 0.7 < palmArea;
 
-    showingPalm = showingPalm && palmExtended;
+    openPalm = openPalm && palmExtended;
 
     for (let f = 5; f < data.length; f += 4) {
       const fingerPoints = [data[f], data[f + 1], data[f + 2], data[f + 3]];
 
       const fingerExtended = isFingerExtended(fingerPoints);
 
-      showingPalm = showingPalm && fingerExtended;
+      openPalm = openPalm && fingerExtended;
     }
+
+    this.openPalmCounter = clamp(
+      this.openPalmCounter + (openPalm ? 1 : -1),
+      0,
+      30
+    );
 
     function mapCoords(point) {
       return {
@@ -267,7 +356,7 @@ const Hand = class {
         sk.vertex(...Object.values(coords));
 
         sk.strokeWeight(10);
-        sk.stroke(showingPalm ? 0 : 255, 255, showingPalm ? 0 : 255);
+        sk.stroke(openPalm ? 0 : 255, 255, openPalm ? 0 : 255);
         sk.noFill();
       }
 
@@ -294,32 +383,6 @@ const Hand = class {
       : null;
   }
 };
-
-function isFingerExtended(points, tolerance = 0.2) {
-  const vectors = [];
-  for (let i = 0; i < points.length - 1; i++) {
-    const dx = points[i + 1].x - points[i].x;
-    const dy = points[i + 1].y - points[i].y;
-    vectors.push({ dx, dy });
-  }
-
-  for (let i = 0; i < vectors.length - 1; i++) {
-    const angle = Math.abs(
-      Math.atan2(vectors[i + 1].dy, vectors[i + 1].dx) -
-        Math.atan2(vectors[i].dy, vectors[i].dx)
-    );
-
-    if (angle > tolerance) return false;
-  }
-
-  return true;
-}
-
-function triangleArea(a, b, c) {
-  return Math.abs(
-    0.5 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
-  );
-}
 
 const Point = class {
   constructor(coords, index, hand) {
