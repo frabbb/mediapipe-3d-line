@@ -62,7 +62,7 @@ async function createHandLandmarker() {
 new p5((instance) => (sk = instance));
 
 sk.preload = () => {
-  font = sk.loadFont("/mediapipe-3d-line/assets/SpaceMono-Regular.ttf");
+  font = sk.loadFont("/mediapipe-3d-line/SpaceMono-Regular.ttf");
 };
 
 sk.setup = () => {
