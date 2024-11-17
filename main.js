@@ -134,16 +134,12 @@ sk.draw = () => {
     const point = hands[handsRef.left]?.points[0];
     // hands[handsRef.right]?.points[0] ||
 
-    console.log(point.pos.x);
-
     speed.target = Math.round(
       map(point.pos.x, 100, window.innerWidth - 100, speed.min, speed.max, true)
     );
 
     rangeEl.style.width = `${(speed.target / speed.max) * 100}%`;
     speedEl.innerHTML = speed.target;
-
-    return;
   }
 
   angle = angle + speed.current;
@@ -151,10 +147,12 @@ sk.draw = () => {
   const drawPoint = hands[handsRef.right]?.origin;
   // || hands[handsRef.left]?.origin;
 
-  if (drawPoint) {
+  if (drawPoint && !showSettings) {
     if (lineDrawn) {
       line = [];
       lineDrawn = false;
+      draw.current = undefined;
+      draw.target = undefined;
     }
 
     draw.target = drawPoint;
