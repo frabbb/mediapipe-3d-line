@@ -207,10 +207,13 @@ function toggleSettings() {
 }
 
 function drawHands() {
-  if (!handsLandmarks.landmarks?.length) {
-    Object.values(hands).forEach((hand) => {
+  Object.values(hands).forEach((hand) => {
+    if (handsLandmarks.handednesses?.[0]?.[0]?.index !== hand.type) {
       hand.openPalmCounter = clamp(hand.openPalmCounter - 1, 0, 30);
-    });
+    }
+  });
+
+  if (!handsLandmarks.landmarks?.length) {
     return;
   }
 
